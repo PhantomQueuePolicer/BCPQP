@@ -1,0 +1,8 @@
+*.so
+*.o
+*.a
+*.lo
+*.la
+*.slo
+*.log
+*.DS_Store

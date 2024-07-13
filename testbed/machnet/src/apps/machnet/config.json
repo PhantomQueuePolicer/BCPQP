@@ -1,0 +1,8 @@
+{
+  "machnet_config": {
+    "60:45:BD:8A:47:13": {
+      "ip": "10.0.1.13",
+      "engine_threads": 1
+    }
+  }
+}
