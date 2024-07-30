@@ -764,7 +764,7 @@ def plot3(flows, tm, mbps, bws, bwt, bw_e, tm_e, fname="", trange=-1, yheight=-1
   if yheight != -1:
     y1, y2 = yheight[0], yheight[1]
   plt.axis([x1,x2,y1,y2])
-  plt.grid(b=True, which='major', color='white', linestyle='-')
+  # plt.grid(b=True, which='major', color='white', linestyle='-')
 
   
   if texts != []:

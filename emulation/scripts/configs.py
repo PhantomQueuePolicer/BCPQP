@@ -2,12 +2,12 @@
 # exp logistics config
 
 # end point config
-cc_flows = ["reno 1, cubic 1, vegas 1, bbr 1", "reno 4"] # CC + number of flows
+cc_flows = ["reno 1, cubic 1, vegas 1, bbr 1"] # CC + number of flows
 data_to_send = [10 * 1000 * 1000, 10 * 1000 * 1000, 10 * 1000 * 1000, 10 * 1000 * 1000] # bytes
 repeats = [1, 1, 1, 1] # number of times each flow repeats
 periods = [15, 15, 15, 15] # time between each repitition in seconds
 start_times = [0, 0, 0, 0] # start time for first time in seconds
-local_ip = "192.168.1.1" # local ip address
+local_ip = "192.17.102.197" # local ip address
 
 # rate enforcement mechanism
 queue_types = ["shp"]

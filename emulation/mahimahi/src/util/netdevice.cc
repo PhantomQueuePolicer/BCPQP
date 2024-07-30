@@ -35,8 +35,10 @@ void interface_ioctl( FileDescriptor & fd, const unsigned long request,
 {
     ifreq ifr;
     zero( ifr );
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wstringop-truncation"
     strncpy( ifr.ifr_name, name.c_str(), IFNAMSIZ ); /* interface name */
-
+    #pragma GCC diagnostic pop
     ifr_adjustment( ifr );
 
     SystemCall( "ioctl " + name, ioctl( fd.fd_num(), request, static_cast<void *>( &ifr ) ) );

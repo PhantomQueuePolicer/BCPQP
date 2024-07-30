@@ -156,7 +156,7 @@ void Shaper::enqueue(QueuedPacket&& p)
 {
   uint16_t src, dst;
   std::string src_ip, dst_ip;
-  _parse_ports_8((const unsigned char *) p.contents.substr(24,4).c_str(), &dst, &src);
+  _parse_ports_8((const unsigned char *) p.contents.substr(24,4).c_str(), &src, &dst);
   _parse_ip_5((const unsigned char *) p.contents.substr(16,8).c_str(), &src_ip, &dst_ip);
   *log_<< "Paket header "<< src_ip << " "<< dst_ip<<endl;
   uint16_t q_i = src%num_flows;

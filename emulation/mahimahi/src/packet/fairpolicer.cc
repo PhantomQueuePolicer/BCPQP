@@ -105,7 +105,7 @@ void FairPolicer::enqueue(QueuedPacket&& p)
   uint16_t src, dst;
   int pkt_len = (int) p.contents.size();
   int32_t threshold = burst - combined_queue_size;
-  _parse_ports_fpl((const unsigned char *) p.contents.substr(24,4).c_str(), &dst, &src);
+  _parse_ports_fpl((const unsigned char *) p.contents.substr(24,4).c_str(), &src, &dst);
   if (buckets[src % num_flows] + pkt_len < threshold){
     buckets[src % num_flows] += pkt_len;
     combined_queue_size += pkt_len;
