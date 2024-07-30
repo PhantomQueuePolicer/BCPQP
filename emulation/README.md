@@ -36,7 +36,19 @@ In `scripts/configs.py` file, configure experiment setup including
 
 To run the experiments and generate plots:
 
+Run the server first:
+
+```
+sudo python3 traffic_server.py
+```
+
+Then run the following to create mahimahi shell and generate flows:
+
 ```
 python3 run_all.py
+```
+
+To generate plots, run:
+```
 python3 plot.py
 ```

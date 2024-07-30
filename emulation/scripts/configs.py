@@ -7,6 +7,7 @@ data_to_send = [10 * 1000 * 1000, 10 * 1000 * 1000, 10 * 1000 * 1000, 10 * 1000 
 repeats = [1, 1, 1, 1] # number of times each flow repeats
 periods = [15, 15, 15, 15] # time between each repitition in seconds
 start_times = [0, 0, 0, 0] # start time for first time in seconds
+local_ip = "192.168.1.1" # local ip address
 
 # rate enforcement mechanism
 queue_types = ["shp"]

@@ -24,7 +24,7 @@ num_flows = configs.num_queues
 tbf_map = {"droptail": 3, "codel": 4, "pie": 5}
 
 for queue in queue_types:
-    internal_queue = 0 # won't put any internal queue
+    internal_queue = 3 # won't put any internal queue
     queue_ = queue
     if "_" in queue:
         internal_queue = tbf_map[queue.split("_")[1]]

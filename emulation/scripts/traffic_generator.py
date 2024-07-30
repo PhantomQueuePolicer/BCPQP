@@ -1,6 +1,7 @@
 import socket
 import threading
 import time
+import configs
 
 class Config():
     def __init__(self, congestion_protocols, ports, schedule, bursts=[]):
@@ -35,7 +36,7 @@ class TrafficGenerator():
         self.tcpdump = tcpdump
         if self.tcpdump:
             self.control_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.control_conn.connect(('192.168.112.173', 8081))
+            self.control_conn.connect((configs.local_ip, 8081))
             msg = "tcpdump:%s" %(tcpdump_fname)
             self.control_conn.send(msg.encode('utf-8'))
         #sort by times
@@ -65,7 +66,7 @@ class TrafficGenerator():
             clientsocket.bind(("100.64.0.5", port))
         except:
             clientsocket.bind(("100.64.0.4", port))
-        clientsocket.connect(('192.168.112.173', 8081))
+        clientsocket.connect((configs.local_ip, 8081))
         clientsocket.send("%d %d %d %d".encode('utf-8') %(schedule[1], schedule[2], schedule[3], schedule[4]))
         return clientsocket
     

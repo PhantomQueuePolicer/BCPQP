@@ -3,24 +3,25 @@ import threading
 import time
 import subprocess
 import os
+import configs
 
 tcpdump = None
 
 def run_tcpdump(directory):
-	process = subprocess.Popen(["tcpdump", "-i", "any", "-w", directory, "net", "100.64.0.0/24"], shell=False, stdout=subprocess.DEVNULL, preexec_fn=os.setsid)
-	return process
+    process = subprocess.Popen(["tcpdump", "-i", "any", "-w", directory, "net", "100.64.0.0/24"], shell=False, stdout=subprocess.DEVNULL, preexec_fn=os.setsid)
+    return process
 
 def get_pid(name):
-	try:
-		output = subprocess.check_output(["pidof", name])
-		return list(map(int, output.split()))
-	except:
-		return []
+    try:
+        output = subprocess.check_output(["pidof", name])
+        return list(map(int, output.split()))
+    except:
+        return []
 
 def kill_tcpdump():
-	tcpdump_pids = get_pid("tcpdump")
-	for pid in tcpdump_pids:
-		os.system("sudo kill -9 %s" %(pid))
+    tcpdump_pids = get_pid("tcpdump")
+    for pid in tcpdump_pids:
+        os.system("sudo kill -9 %s" %(pid))
 
 def handle_connection(connection, address):
     global tcpdump
@@ -57,7 +58,7 @@ def handle_connection(connection, address):
 
 def start_server():
     serversocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    serversocket.bind(('192.168.112.173', 8081))
+    serversocket.bind((configs.local_ip, 8081))
     serversocket.listen(5)
 
     while True:
