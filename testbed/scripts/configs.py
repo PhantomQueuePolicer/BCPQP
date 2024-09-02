@@ -16,7 +16,7 @@ flow = (port,
 cc = ["reno", "cubic", "bbr", "vegas"]
 rtt = [1,2,3]
 port_start = 2049
-multipler = 100
+multipler = 1
 m2 = 1
 num_shapers = 30
 
