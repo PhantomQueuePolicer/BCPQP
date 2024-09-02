@@ -80,6 +80,8 @@ try:
     start_server()
 except KeyboardInterrupt:
     ts = datetime.datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
+    if not os.path.isdir("logs"):
+        os.mkdir("logs")
     file = open("logs/%s.log" %(ts), "w")
     for f in throughputs.keys():
         file.write(str(f))
