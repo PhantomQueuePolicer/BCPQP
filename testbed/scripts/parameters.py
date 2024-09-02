@@ -20,11 +20,11 @@ def main(args):
     num_buckets = (rtt_sec*2) / bucket_size
     bucket_size_us = bucket_size*10e6
 
-    print("Shaper: docker run -v /var/run/machnet:/var/run/machnet ghcr.io/microsoft/machnet/machnet:latest release_build/src/apps/shaper/shaper --remote_ip1 %s --remote_ip2 %s --rate %d --qlen %d --num-shapers %d --num-queues %d --num-buckets %d --bucket-len %d\n" %(args.sender, args.receiver, args.rate, bdp*2, args.ns, args.nq, num_buckets, bucket_size_us))
-    print("Policer (BDP): docker run -v /var/run/machnet:/var/run/machnet ghcr.io/microsoft/machnet/machnet:latest release_build/src/apps/policer/policer --remote_ip1 %s --remote_ip2 %s --rate %d --qlen %d --num-shapers %d\n" %(args.sender, args.receiver, args.rate, bdp*2, args.ns))
-    print("Policer (BDP^2): docker run -v /var/run/machnet:/var/run/machnet ghcr.io/microsoft/machnet/machnet:latest release_build/src/apps/policer/policer --remote_ip1 %s --remote_ip2 %s --rate %d --qlen %d --num-shapers %d\n" %(args.sender, args.receiver, args.rate, bdp_2, args.ns))
-    print("FairPolicer: docker run -v /var/run/machnet:/var/run/machnet ghcr.io/microsoft/machnet/machnet:latest release_build/src/apps/fairpolicer/fairpolicer --remote_ip1 %s --remote_ip2 %s --rate %d --qlen %d --num-shapers %d --num-queues %d\n" %(args.sender, args.receiver, args.rate, bdp_2, args.ns, args.nq))
-    print("BCPQP: docker run -v /var/run/machnet:/var/run/machnet ghcr.io/microsoft/machnet/machnet:latest release_build/src/apps/bcpqp/bcpqp --remote_ip1 %s --remote_ip2 %s --rate %d --qlen %d --num-shapers %d --num-queues %d\n" %(args.sender, args.receiver, args.rate, 10*bdp_2, args.ns, args.nq))
+    print("Shaper: sudo GLOG_logtostderr=1 ../release_build/src/apps/shaper/shaper --remote_ip1 %s --remote_ip2 %s --rate %d --qlen %d --num-shapers %d --num-queues %d --num-buckets %d --bucket-len %d\n" %(args.sender, args.receiver, args.rate, bdp*2, args.ns, args.nq, num_buckets, bucket_size_us))
+    print("Policer (BDP): sudo GLOG_logtostderr=1 ../release_build/src/apps/policer/policer --remote_ip1 %s --remote_ip2 %s --rate %d --qlen %d --num-shapers %d\n" %(args.sender, args.receiver, args.rate, bdp*2, args.ns))
+    print("Policer (BDP^2): sudo GLOG_logtostderr=1 ../release_build/src/apps/policer/policer --remote_ip1 %s --remote_ip2 %s --rate %d --qlen %d --num-shapers %d\n" %(args.sender, args.receiver, args.rate, bdp_2, args.ns))
+    print("FairPolicer: sudo GLOG_logtostderr=1 ../release_build/src/apps/fairpolicer/fairpolicer --remote_ip1 %s --remote_ip2 %s --rate %d --qlen %d --num-shapers %d --num-queues %d\n" %(args.sender, args.receiver, args.rate, bdp_2, args.ns, args.nq))
+    print("BCPQP: sudo GLOG_logtostderr=1 ../release_build/src/apps/bcpqp/bcpqp --remote_ip1 %s --remote_ip2 %s --rate %d --qlen %d --num-shapers %d --num-queues %d\n" %(args.sender, args.receiver, args.rate, 10*bdp_2, args.ns, args.nq))
 
 
 
