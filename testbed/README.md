@@ -6,7 +6,7 @@ Machnet is a kernel bypass networking framework for Azure Cloud VMs. You can fin
 
 ## Setup VMs
 
-While we evaluated BC-PQP for our paper with F8sv2 VMs running Ubuntu 22.04, you can also use other cheaper and more readily available VMs such as D2sv3 as well. You will need 3 VMs in the same virtual network: a sender, a receiver, and a shaping middlebox. The middlebox VM needs to support "Accelerated Networking" so that we can run DPDK on it. To do this, you'll need to create a new NIC and attach the middlebox VM to it so that you have two network interfaces: `eth0` and `eth1`. 
+While we evaluated BC-PQP for our paper with F8sv2 VMs running Ubuntu 22.04, you can also use other cheaper and more readily available VMs such as D2sv3. You will need 3 VMs in the same virtual network: a sender, a receiver, and a shaping middlebox. The middlebox VM needs to support "Accelerated Networking" so that we can run DPDK on it. To do this, you'll need to create a new NIC and attach the middlebox VM to it so that you have two network interfaces: `eth0` and `eth1`. 
 
 ## Building Machnet
 
@@ -46,6 +46,7 @@ ninja install
 Get and build DPDK:
 
 ```
+cd
 export RTE_SDK="/root/dpdk"
 git clone --depth 1 --branch 'v21.11' https://github.com/DPDK/dpdk.git ${RTE_SDK}
 cd ${RTE_SDK}
@@ -159,7 +160,7 @@ python3 traffic_server.py
 And run following at the sender:
 
 ```
-python3 exp.py
+python3 run.py
 ```
 
 This generates a file containing summary of per-flow throughput in `logs` directory at the receiver. Additionally, information about CPU cycles per packet is printed on middlebox VM's shell, copy this into a log as well.
