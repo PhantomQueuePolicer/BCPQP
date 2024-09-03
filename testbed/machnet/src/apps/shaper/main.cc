@@ -96,11 +96,11 @@ struct shaper_queue_index {
 struct shaper_struct {
   /**
    * @param rate rate in Mbps
-   * @param burst token bucket size in bytes
-   * @param num_queues number of queues per shaper
-   * @param q_sizes max queue size in bytes
+   * @param burst rate in Mbps
+   * @param num_queues rate in Mbps
+   * @param q_sizes queue size counters in bytes
    * `std::vector<uint64_t>` format.
-   * @param qs packet queues in the
+   * @param qs Local IP address to be used by the applicaton in
    * `std::vector<juggler::dpdk::Packet *>` format.
    */
   shaper_struct(float rate, uint64_t burst, uint16_t num_queues,
@@ -135,10 +135,8 @@ struct shaper_struct {
 
 struct timerwheel_struct {
   /**
-   * @param bkts timerwheel buckets data structure in
+   * @param bkts queue size counters in bytes
    * `std::vector<std::vector<shaper_struct *>>` format.
-   * @param n_bkts number of buckets in the timerwheel
-   * @param bkt_len size of each bucket in micro-seconds
    */
   timerwheel_struct(std::vector<std::vector<shaper_struct *>> bkts, uint32_t n_bkts, float bkt_len)
       : buckets(bkts),
@@ -166,7 +164,7 @@ struct shaper_context {
    * `float` format.
    * @param qlen Size of each queue in shaper
    * `uint_32t` format.
-   * @param burst Size of token bucket in each shaper
+   * @param burst Size of bucket in each shaper
    * `uint_32t` format.
    * @param num_shapers Number of shapers
    * `uint_16t` format.
@@ -441,7 +439,7 @@ void report_final_stats(void *context) {
 }
 
 // classifies packet into shaper and queue. This can be redefined later.
-// Right now we are classifying based on port numbers. Flows with contiguous ports are classified into one shaper
+// I am classifying based on port numbers. Flows with contiguous ports are classified into one shaper
 // and a separate queue within a shaper for each port
 shaper_queue_index* classify(juggler::net::Ipv4 * ipv4h, task_context* ctx){
     uint64_t shaper = 0;
@@ -479,8 +477,6 @@ uint64_t next_dequeue_time_idx(shaper_struct* shaper, timerwheel_struct* timerwh
   return next_slot;
 }
 
-// abstraction for rate sharing policy: decide the next queue to dequeue a packet from.
-// You can maintain additional metadata in shaper struct to support different policies
 uint16_t sched_policy(shaper_struct* shaper){
   // work conserving fairness
   uint16_t i = (shaper->i + 1) % shaper->active_queues.size();
@@ -494,7 +490,7 @@ juggler::dpdk::Packet * dequeue_from(uint64_t now, shaper_struct* shaper){
   }
   // pick next queue to dequeue a packet from based on defined policy
   uint16_t a_i = sched_policy(shaper);
-  // a_i is index in active_queues list, retrieve actual queue index
+  // a_i is index in active_queues list, retrive actual queue index
   uint16_t q_i = shaper->active_queues[a_i];
   // try to dequeue a packet
   if (shaper->queues[q_i].front()->length() < shaper->tokens){

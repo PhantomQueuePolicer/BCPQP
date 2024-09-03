@@ -50,10 +50,8 @@ DEFINE_string(rtt_log, "", "Log file for RTT measurements.");
 DEFINE_uint64(rate, 1500, "Rate in Kbit/s.");
 DEFINE_uint64(burst, 30000, "Bucket size in bytes.");
 DEFINE_uint64(qlen, 32000, "Queue length in bytes.");
-DEFINE_uint64(num_shapers, 2050, "Number of shaper instantiations.");
-DEFINE_uint64(num_queues, 64, "Number of queues per shaper instantiations.");
-DEFINE_uint64(num_buckets, 1000, "Number of buckets in timerwheel.");
-DEFINE_uint64(bucket_size, 5, "Timerwheel bucket size in ms.");
+DEFINE_uint64(num_aggregates, 2050, "Number of pqp instantiations.");
+DEFINE_uint64(num_queues, 64, "Number of queues per pqp instantiations.");
 
 
 // This is the source/destination UDP port used by the application.
@@ -85,16 +83,15 @@ struct stats {
 };
 
 
-struct shaper_queue_index {
-  shaper_queue_index(uint64_t s_i, uint64_t q_i)
-      : shaper(s_i),
+struct pqp_queue_index {
+  pqp_queue_index(uint64_t s_i, uint64_t q_i)
+      : pqp(s_i),
         queue(q_i) {}
-  uint64_t shaper;
+  uint64_t pqp;
   uint64_t queue;
 };
 
-// by shaper we refer to an aggregate here
-struct shaper_struct {
+struct pqp_struct {
   /**
    * @param rate rate in Mbps
    * @param burst rate in Mbps
@@ -104,7 +101,7 @@ struct shaper_struct {
    * @param qs Local IP address to be used by the applicaton in
    * `std::vector<juggler::dpdk::Packet *>` format.
    */
-  shaper_struct(float rate, uint64_t burst, uint16_t num_queues,
+  pqp_struct(float rate, uint64_t burst, uint16_t num_queues,
                 std::vector<uint64_t> q_sizes)
       : tokens(burst),
         rate(rate),
@@ -147,67 +144,43 @@ struct shaper_struct {
 };
 
 
-struct timerwheel_struct {
-  /**
-   * @param bkts queue size counters in bytes
-   * `std::vector<std::vector<shaper_struct *>>` format.
-   */
-  timerwheel_struct(std::vector<std::vector<shaper_struct *>> bkts, uint32_t n_bkts, uint64_t bkt_len)
-      : buckets(bkts),
-        num_buckets(n_bkts),
-        bucket_len(bkt_len),
-        last_dequeue_time(0),
-        current_slot(0) {}
-  std::vector<std::vector<shaper_struct *>> buckets;
-  uint32_t num_buckets;
-  uint64_t bucket_len;
-  uint64_t last_dequeue_time;
-  uint32_t current_slot;
-};
-
-
 /**
  * @brief This structure contains all the metadata required for all the routines
- * related to the shaper.
+ * related to the pqp.
  */
-struct shaper_context {
+struct pqp_context {
   /**
-   * @param rate Rate for each shaper in Mbps
+   * @param rate Rate for each pqp in Mbps
    * `float` format.
-   * @param qlen Size of each queue in shaper
+   * @param qlen Size of each queue in pqp
    * `uint_32t` format.
-   * @param burst Size of bucket in each shaper
+   * @param burst Size of bucket in each pqp
    * `uint_32t` format.
-   * @param num_shapers Number of shapers
+   * @param num_pqps Number of pqps
    * `uint_16t` format.
-   * @param num_queues Number of queues per shaper
+   * @param num_queues Number of queues per pqp
    * `uint_8t` format.
-   * @param shapers_list List of shapers
-   * `std::vector<shaper_struct*>` format.
-   * @param timer_wheel timer_wheel
-   * `timerwheel_struct*` format.
+   * @param pqps_list List of pqps
+   * `std::vector<pqp_struct*>` format.
    */
-  shaper_context(float rate,
+  pqp_context(float rate,
                uint32_t qlen,
                uint32_t burst,
-               uint16_t num_shapers,
+               uint16_t num_pqps,
                uint8_t num_queues,
-               std::vector<shaper_struct*> shapers_list,
-               timerwheel_struct* timer_wheel)
+               std::vector<pqp_struct*> pqps_list)
       : rate(rate),
         qlen(qlen),
         burst(burst),
-        num_shapers(num_shapers),
+        num_pqps(num_pqps),
         num_queues(num_queues),
-        shapers(shapers_list),
-        timerwheel(CHECK_NOTNULL(timer_wheel)){}
+        pqps(pqps_list){}
   float rate;
   uint32_t qlen;
   uint32_t burst;
-  uint16_t num_shapers;
+  uint16_t num_pqps;
   uint8_t num_queues;
-  std::vector<shaper_struct*> shapers;
-  timerwheel_struct* timerwheel;
+  std::vector<pqp_struct*> pqps;
 };
 
 /**
@@ -243,7 +216,7 @@ struct task_context {
                uint16_t packet_size, juggler::dpdk::RxRing *rxring,
                juggler::dpdk::TxRing *txring,
                std::vector<std::vector<uint8_t>> payloads,
-               shaper_context* shaper_ctx)
+               pqp_context* pqp_ctx)
       : local_mac_addr(local_mac),
         local_ipv4_addr(local_ip),
         remote_mac_addr(remote_mac1),
@@ -254,7 +227,7 @@ struct task_context {
         rx_ring(CHECK_NOTNULL(rxring)),
         tx_ring(CHECK_NOTNULL(txring)),
         packet_payloads(payloads),
-        shaper_ctx(shaper_ctx),
+        pqp_ctx(pqp_ctx),
         arp_handler(local_mac, {local_ip}),
         statistics(),
         rtt_log() {}
@@ -271,7 +244,7 @@ struct task_context {
   juggler::dpdk::TxRing *tx_ring;
 
   std::vector<std::vector<uint8_t>> packet_payloads;
-  shaper_context* shaper_ctx;
+  pqp_context* pqp_ctx;
   juggler::ArpHandler arp_handler;
 
   stats statistics;
@@ -447,79 +420,79 @@ void report_final_stats(void *context) {
       st->tx_success, st->err_tx_drops, st->err_no_mbufs, st->rx_count);
 }
 
-// classifies packet into shaper and queue. This can be redefined later.
-// I am classifying based on port numbers. Flows with contiguous ports are classified into one shaper
-// and a separate queue within a shaper for each port
-shaper_queue_index* classify(juggler::net::Ipv4 * ipv4h, task_context* ctx){
-    uint64_t shaper = 0;
+// classifies packet into pqp and queue. This can be redefined later.
+// I am classifying based on port numbers. Flows with contiguous ports are classified into one pqp
+// and a separate queue within a pqp for each port
+pqp_queue_index* classify(juggler::net::Ipv4 * ipv4h, task_context* ctx){
+    uint64_t pqp = 0;
     uint64_t queue = 0;
     auto *udph = reinterpret_cast<juggler::net::Udp *>(ipv4h + 1);
     uint16_t dst_port =  uint16_t(udph->src_port.port.value());
 
     if (ipv4h->dst_addr.address == juggler::be32_t(ctx->remote_ipv4_addr.value().address)){
-      shaper += 1;
-      shaper += (dst_port / ctx->shaper_ctx->num_queues);
-      queue += (dst_port % ctx->shaper_ctx->num_queues);
+      pqp += 1;
+      pqp += (dst_port / ctx->pqp_ctx->num_queues);
+      queue += (dst_port % ctx->pqp_ctx->num_queues);
     } else if (ipv4h->dst_addr.address == juggler::be32_t(ctx->remote_ipv4_addr2.value().address)){
-      shaper += ctx->shaper_ctx->num_shapers/2;
-      shaper += (dst_port / ctx->shaper_ctx->num_queues);
-      queue += (dst_port % ctx->shaper_ctx->num_queues);
+      pqp += ctx->pqp_ctx->num_pqps/2;
+      pqp += (dst_port / ctx->pqp_ctx->num_queues);
+      queue += (dst_port % ctx->pqp_ctx->num_queues);
     }
 
-    if (shaper){
-      shaper_queue_index* sqi = new shaper_queue_index(shaper, queue);
+    if (pqp){
+      pqp_queue_index* sqi = new pqp_queue_index(pqp, queue);
       return sqi;
     }
     return NULL;
 }
 
-// this function is called for any shaper, when one of its queues is full and we need to accept a packet
-void phantom_dequeue(uint64_t now, shaper_struct* shaper){
-  uint64_t time_elapsed = now - shaper->last_dequeue_time;
+// this function is called for any pqp, when one of its queues is full and we need to accept a packet
+void phantom_dequeue(uint64_t now, pqp_struct* pqp){
+  uint64_t time_elapsed = now - pqp->last_dequeue_time;
   float time_elapsed_ms = juggler::time::cycles_to_ms(time_elapsed);
   // based on last dequeue time, decide how many 'tokens' to dequeue from all queues
   // no upper limit, because we call this function non-periodically when a queue becomes full
-  shaper->tokens = shaper->bytes_per_ms * time_elapsed_ms;
-  uint16_t active_queues = shaper->active_queues.size();
+  pqp->tokens = pqp->bytes_per_ms * time_elapsed_ms;
+  uint16_t active_queues = pqp->active_queues.size();
   // no need to execute more often than this, because packets may be dropped anyways
-  if (shaper->tokens < (1500 * active_queues)){
+  if (pqp->tokens < (1500 * active_queues)){
     return;
   }
-  shaper->last_dequeue_time = now;
+  pqp->last_dequeue_time = now;
   // divides tokens in a work-conserving fair manner through a water filling algorithm
-  while (active_queues && shaper->tokens / active_queues){
-    uint64_t per_queue_tokens = shaper->tokens / active_queues;
+  while (active_queues && pqp->tokens / active_queues){
+    uint64_t per_queue_tokens = pqp->tokens / active_queues;
     for (uint16_t i=0; i<active_queues; i++){
-      uint64_t q_i = shaper->active_queues[i];
-      // std::cout<<"before "<< shaper->queue_sizes[q_i]<<std::endl;
-      if (shaper->queue_sizes[q_i] > per_queue_tokens){
-        shaper->queue_sizes[q_i] -= per_queue_tokens;
-        shaper->tokens -= per_queue_tokens;
-        shaper->dequeues_in_last_period[q_i] += per_queue_tokens;
+      uint64_t q_i = pqp->active_queues[i];
+      // std::cout<<"before "<< pqp->queue_sizes[q_i]<<std::endl;
+      if (pqp->queue_sizes[q_i] > per_queue_tokens){
+        pqp->queue_sizes[q_i] -= per_queue_tokens;
+        pqp->tokens -= per_queue_tokens;
+        pqp->dequeues_in_last_period[q_i] += per_queue_tokens;
       } else {
-        shaper->tokens -= shaper->queue_sizes[q_i];
-        shaper->dequeues_in_last_period[q_i] += shaper->queue_sizes[q_i];
-        shaper->queue_sizes[q_i] = 0;
-        shaper->active_queues.erase(std::remove(shaper->active_queues.begin(), shaper->active_queues.end(), q_i), shaper->active_queues.end());
-        active_queues = shaper->active_queues.size();
+        pqp->tokens -= pqp->queue_sizes[q_i];
+        pqp->dequeues_in_last_period[q_i] += pqp->queue_sizes[q_i];
+        pqp->queue_sizes[q_i] = 0;
+        pqp->active_queues.erase(std::remove(pqp->active_queues.begin(), pqp->active_queues.end(), q_i), pqp->active_queues.end());
+        active_queues = pqp->active_queues.size();
       }
-      if (juggler::time::cycles_to_ms(now - shaper->last_enqueue_calc_time[q_i]) > 200){
+      if (juggler::time::cycles_to_ms(now - pqp->last_enqueue_calc_time[q_i]) > 200){
         if (active_queues){ 
-          shaper->upper_threshold = (shaper->bytes_per_ms * 200.0) / active_queues;
+          pqp->upper_threshold = (pqp->bytes_per_ms * 200.0) / active_queues;
         } else {
-          shaper->upper_threshold = (shaper->bytes_per_ms * 200.0);
+          pqp->upper_threshold = (pqp->bytes_per_ms * 200.0);
         }
-        if (shaper->bytes_in_last_period[q_i] < (shaper->upper_threshold * 0.5)){
+        if (pqp->bytes_in_last_period[q_i] < (pqp->upper_threshold * 0.5)){
           // need to check this here too to catch flows that are not sending any packets
-          shaper->queue_sizes[q_i] -= std::min(shaper->queue_sizes[q_i], shaper->magic_packets[q_i]);
-          if (!shaper->queue_sizes[q_i]){
-            shaper->active_queues.erase(std::remove(shaper->active_queues.begin(), shaper->active_queues.end(), q_i), shaper->active_queues.end());
-            active_queues = shaper->active_queues.size();
+          pqp->queue_sizes[q_i] -= std::min(pqp->queue_sizes[q_i], pqp->magic_packets[q_i]);
+          if (!pqp->queue_sizes[q_i]){
+            pqp->active_queues.erase(std::remove(pqp->active_queues.begin(), pqp->active_queues.end(), q_i), pqp->active_queues.end());
+            active_queues = pqp->active_queues.size();
           }
-          shaper->magic_packets[q_i] = 0;
+          pqp->magic_packets[q_i] = 0;
         }
-        shaper->last_enqueue_calc_time[q_i] = now;
-        shaper->bytes_in_last_period[q_i] = 0;
+        pqp->last_enqueue_calc_time[q_i] = now;
+        pqp->bytes_in_last_period[q_i] = 0;
       }
     }
   }
@@ -531,7 +504,7 @@ void phantom_dequeue(uint64_t now, shaper_struct* shaper){
 // or drop packets
 void enqueue(uint64_t now, void *context) {
   auto ctx = static_cast<task_context *>(context);
-  auto shp_ctx = ctx->shaper_ctx;
+  auto pqp_ctx = ctx->pqp_ctx;
   auto rx = ctx->rx_ring;
   auto tx = ctx->tx_ring;
   auto *st = &ctx->statistics;
@@ -560,7 +533,7 @@ void enqueue(uint64_t now, void *context) {
 
     auto *ipv4h = packet->head_data<juggler::net::Ipv4 *>(sizeof(*eh));
     // configure headers to relay traffic, we have a proxy like architecture, where sender attempts to send data
-    // to a receiver but iptables on sender (and receiver) reroute packets to the shaper proxy. So we need to replace
+    // to a receiver but iptables on sender (and receiver) reroute packets to the pqp proxy. So we need to replace
     // mac and ip headers here.
     if (ipv4h->src_addr.address == juggler::be32_t(ctx->remote_ipv4_addr.value().address)){
       
@@ -599,61 +572,61 @@ void enqueue(uint64_t now, void *context) {
 
     }
 
-    // classify packet into a shaper id and queue id
-    auto shaper_queue_id = classify(ipv4h, ctx);
+    // classify packet into a pqp id and queue id
+    auto pqp_queue_id = classify(ipv4h, ctx);
     uint64_t cycles = _rdtsc();
-    if (shaper_queue_id){
+    if (pqp_queue_id){
 
-      auto shaper_id = shaper_queue_id->shaper;
-      auto queue_id = shaper_queue_id->queue;
+      auto pqp_id = pqp_queue_id->pqp;
+      auto queue_id = pqp_queue_id->queue;
       // if queue is full, only then phantom_dequeue is called
-      if(shp_ctx->shapers[shaper_id]->queue_sizes[queue_id] + packet->length() > shp_ctx->qlen){
-        phantom_dequeue(now, shp_ctx->shapers[shaper_id]);
+      if(pqp_ctx->pqps[pqp_id]->queue_sizes[queue_id] + packet->length() > pqp_ctx->qlen){
+        phantom_dequeue(now, pqp_ctx->pqps[pqp_id]);
       }
-      if(shp_ctx->shapers[shaper_id]->queue_sizes[queue_id] + packet->length() <= shp_ctx->qlen){
+      if(pqp_ctx->pqps[pqp_id]->queue_sizes[queue_id] + packet->length() <= pqp_ctx->qlen){
         // can accept and transmit this packet
-        if (!shp_ctx->shapers[shaper_id]->queue_sizes[queue_id]){
+        if (!pqp_ctx->pqps[pqp_id]->queue_sizes[queue_id]){
           // this queue has become active
-          shp_ctx->shapers[shaper_id]->active_queues.push_back(queue_id);
+          pqp_ctx->pqps[pqp_id]->active_queues.push_back(queue_id);
         }
-        shp_ctx->shapers[shaper_id]->queue_sizes[queue_id] += packet->length();
-        shp_ctx->shapers[shaper_id]->bytes_in_last_period[queue_id] += packet->length();
+        pqp_ctx->pqps[pqp_id]->queue_sizes[queue_id] += packet->length();
+        pqp_ctx->pqps[pqp_id]->bytes_in_last_period[queue_id] += packet->length();
 
-        if (!shp_ctx->shapers[shaper_id]->last_enqueue_calc_time[queue_id]){
-          shp_ctx->shapers[shaper_id]->last_enqueue_calc_time[queue_id] = now; 
+        if (!pqp_ctx->pqps[pqp_id]->last_enqueue_calc_time[queue_id]){
+          pqp_ctx->pqps[pqp_id]->last_enqueue_calc_time[queue_id] = now; 
         }
 
         // calculate theta to decide whether to add magic packets or not (we are doing it for fairness here)
-        uint16_t active_queues = shp_ctx->shapers[shaper_id]->active_queues.size();
+        uint16_t active_queues = pqp_ctx->pqps[pqp_id]->active_queues.size();
         if (active_queues){ 
-          shp_ctx->shapers[shaper_id]->upper_threshold = (shp_ctx->shapers[shaper_id]->bytes_per_ms * 200.0) / active_queues;
+          pqp_ctx->pqps[pqp_id]->upper_threshold = (pqp_ctx->pqps[pqp_id]->bytes_per_ms * 200.0) / active_queues;
         } else {
-          shp_ctx->shapers[shaper_id]->upper_threshold = (shp_ctx->shapers[shaper_id]->bytes_per_ms * 200.0);
+          pqp_ctx->pqps[pqp_id]->upper_threshold = (pqp_ctx->pqps[pqp_id]->bytes_per_ms * 200.0);
         }
 
         // if number of packets accepted in this time period has exceeded upper threshold, add magic packets
-        if (shp_ctx->shapers[shaper_id]->bytes_in_last_period[queue_id] > (shp_ctx->shapers[shaper_id]->upper_threshold * 1.5)){
-          if (shaper_id > 1024)
+        if (pqp_ctx->pqps[pqp_id]->bytes_in_last_period[queue_id] > (pqp_ctx->pqps[pqp_id]->upper_threshold * 1.5)){
+          if (pqp_id > 1024)
           // need to phantom dequeue before to ensure next packet sees a full queue
-          phantom_dequeue(now, shp_ctx->shapers[shaper_id]);
-          shp_ctx->shapers[shaper_id]->magic_packets[queue_id] += (shp_ctx->qlen - shp_ctx->shapers[shaper_id]->queue_sizes[queue_id]);
-          if (!shp_ctx->shapers[shaper_id]->queue_sizes[queue_id]){
-            shp_ctx->shapers[shaper_id]->active_queues.push_back(queue_id);
+          phantom_dequeue(now, pqp_ctx->pqps[pqp_id]);
+          pqp_ctx->pqps[pqp_id]->magic_packets[queue_id] += (pqp_ctx->qlen - pqp_ctx->pqps[pqp_id]->queue_sizes[queue_id]);
+          if (!pqp_ctx->pqps[pqp_id]->queue_sizes[queue_id]){
+            pqp_ctx->pqps[pqp_id]->active_queues.push_back(queue_id);
           }
-          shp_ctx->shapers[shaper_id]->queue_sizes[queue_id] = shp_ctx->qlen;
-          shp_ctx->shapers[shaper_id]->last_enqueue_calc_time[queue_id] = now;
-          shp_ctx->shapers[shaper_id]->bytes_in_last_period[queue_id] = 0;
-        } else if (juggler::time::cycles_to_ms(now - shp_ctx->shapers[shaper_id]->last_enqueue_calc_time[queue_id]) > 200){
+          pqp_ctx->pqps[pqp_id]->queue_sizes[queue_id] = pqp_ctx->qlen;
+          pqp_ctx->pqps[pqp_id]->last_enqueue_calc_time[queue_id] = now;
+          pqp_ctx->pqps[pqp_id]->bytes_in_last_period[queue_id] = 0;
+        } else if (juggler::time::cycles_to_ms(now - pqp_ctx->pqps[pqp_id]->last_enqueue_calc_time[queue_id]) > 200){
           // check every T time to decide whether to remove magic packets
-          if (shp_ctx->shapers[shaper_id]->bytes_in_last_period[queue_id] < (shp_ctx->shapers[shaper_id]->upper_threshold * 0.5)){
+          if (pqp_ctx->pqps[pqp_id]->bytes_in_last_period[queue_id] < (pqp_ctx->pqps[pqp_id]->upper_threshold * 0.5)){
             // remove magic packets
-            shp_ctx->shapers[shaper_id]->queue_sizes[queue_id] -= std::min(shp_ctx->shapers[shaper_id]->queue_sizes[queue_id], shp_ctx->shapers[shaper_id]->magic_packets[queue_id]);
-            if (!shp_ctx->shapers[shaper_id]->queue_sizes[queue_id])
-              shp_ctx->shapers[shaper_id]->active_queues.erase(std::remove(shp_ctx->shapers[shaper_id]->active_queues.begin(), shp_ctx->shapers[shaper_id]->active_queues.end(), queue_id), shp_ctx->shapers[shaper_id]->active_queues.end());
-            shp_ctx->shapers[shaper_id]->magic_packets[queue_id] = 0;
+            pqp_ctx->pqps[pqp_id]->queue_sizes[queue_id] -= std::min(pqp_ctx->pqps[pqp_id]->queue_sizes[queue_id], pqp_ctx->pqps[pqp_id]->magic_packets[queue_id]);
+            if (!pqp_ctx->pqps[pqp_id]->queue_sizes[queue_id])
+              pqp_ctx->pqps[pqp_id]->active_queues.erase(std::remove(pqp_ctx->pqps[pqp_id]->active_queues.begin(), pqp_ctx->pqps[pqp_id]->active_queues.end(), queue_id), pqp_ctx->pqps[pqp_id]->active_queues.end());
+            pqp_ctx->pqps[pqp_id]->magic_packets[queue_id] = 0;
           }
-          shp_ctx->shapers[shaper_id]->last_enqueue_calc_time[queue_id] = now;
-          shp_ctx->shapers[shaper_id]->bytes_in_last_period[queue_id] = 0;
+          pqp_ctx->pqps[pqp_id]->last_enqueue_calc_time[queue_id] = now;
+          pqp_ctx->pqps[pqp_id]->bytes_in_last_period[queue_id] = 0;
         }
 
         tx_batch.Append(packet);
@@ -694,7 +667,7 @@ void enqueue(uint64_t now, void *context) {
 int main(int argc, char *argv[]) {
   ::google::InitGoogleLogging(argv[0]);
   gflags::ParseCommandLineFlags(&argc, &argv, true);
-  gflags::SetUsageMessage("Simple packet shaper.");
+  gflags::SetUsageMessage("Simple packet pqp.");
 
   signal(SIGINT, int_handler);
 
@@ -702,11 +675,11 @@ int main(int argc, char *argv[]) {
   std::optional<juggler::net::Ipv4::Address> remote_ip1;
   std::optional<juggler::net::Ipv4::Address> remote_ip2;
   if (FLAGS_remote_ip1.empty()) {
-    LOG(ERROR) << "Remote IP address is required in shaper mode.";
+    LOG(ERROR) << "Remote IP address is required in pqp mode.";
     exit(1);
   }
   if (FLAGS_remote_ip2.empty()) {
-    LOG(ERROR) << "Remote IP address is required in shaper mode.";
+    LOG(ERROR) << "Remote IP address is required in pqp mode.";
     exit(1);
   }
   remote_ip1 = juggler::net::Ipv4::Address::MakeAddress(FLAGS_remote_ip1);
@@ -786,41 +759,34 @@ int main(int argc, char *argv[]) {
   // auto tx_packet_pool = std::make_unique<juggler::dpdk::PacketPool>(4096);
   // We share the packet pool attached to the RX ring. Since we plan to handle a
   // queue pair from a single core this is safe.
-  std::vector<shaper_struct*> shapers_list;
+  std::vector<pqp_struct*> pqps_list;
   float rate = float(static_cast<uint64_t>(FLAGS_rate)) / 1000.0;
-  for (uint16_t i=0; i<FLAGS_num_shapers; i++){
+  for (uint16_t i=0; i<FLAGS_num_aggregates; i++){
     std::vector<uint64_t> q_sizes;
     for (uint8_t j=0; j<FLAGS_num_queues; j++){
       q_sizes.push_back(0);
     }
-    shaper_struct* shp = new shaper_struct(rate, FLAGS_burst, static_cast<uint16_t>(FLAGS_num_queues), q_sizes);
-    shapers_list.push_back(shp);
+    pqp_struct* pqp = new pqp_struct(rate, FLAGS_burst, static_cast<uint16_t>(FLAGS_num_queues), q_sizes);
+    pqps_list.push_back(pqp);
   }
 
-  std::vector<std::vector<shaper_struct *>> bkts;
-  for (uint16_t i=0; i<FLAGS_num_buckets; i++){
-    std::vector<shaper_struct *> bkt_i;
-    bkts.push_back(bkt_i);
-  }
-  timerwheel_struct* timer_wheel = new timerwheel_struct(bkts, FLAGS_num_buckets, FLAGS_bucket_size);
-
-  shaper_context* shp_ctx = new shaper_context(rate, FLAGS_qlen, FLAGS_burst, FLAGS_num_shapers, FLAGS_num_queues, shapers_list, timer_wheel);
+  pqp_context* pqp_ctx = new pqp_context(rate, FLAGS_qlen, FLAGS_burst, FLAGS_num_aggregates, FLAGS_num_queues, pqps_list);
   task_context task_ctx(interface.l2_addr(), interface.ip_addr(),
                         remote_l2_addr1, remote_ip1, remote_l2_addr2, remote_ip2, packet_len, rxring, txring,
-                        packet_payloads, shp_ctx);
+                        packet_payloads, pqp_ctx);
 
-  auto packet_shaper = [](uint64_t now, void *context) {
+  auto packet_pqp = [](uint64_t now, void *context) {
     enqueue(now, context);
     report_stats(now, context);
   };
 
   auto routine =
-      packet_shaper;
+      packet_pqp;
   // Create a task object to pass to worker thread.
   auto task =
       std::make_shared<juggler::Task>(routine, static_cast<void *>(&task_ctx));
 
-  std::cout << "Starting in phantom mode." << std::endl;
+  std::cout << "Starting in phantom modes." << std::endl;
 
   juggler::WorkerPool<juggler::Task> WPool({task}, {interface.cpu_mask()});
   WPool.Init();

@@ -50,11 +50,8 @@ DEFINE_string(rtt_log, "", "Log file for RTT measurements.");
 DEFINE_uint64(rate, 1500, "Rate in Kbit/s.");
 DEFINE_uint64(burst, 30000, "Bucket size in bytes.");
 DEFINE_uint64(qlen, 32000, "Queue length in bytes.");
-DEFINE_uint64(num_shapers, 2050, "Number of shaper instantiations.");
-DEFINE_uint64(num_queues, 64, "Number of queues per shaper instantiations.");
-DEFINE_uint64(num_buckets, 1000, "Number of buckets in timerwheel.");
-DEFINE_uint64(bucket_size, 5, "Timerwheel bucket size in ms.");
-
+DEFINE_uint64(num_aggregates, 2050, "Number of fpolicer instantiations.");
+DEFINE_uint64(num_queues, 64, "Number of queues per fpolicer instantiations.");
 
 // This is the source/destination UDP port used by the application.
 const uint16_t kAppUDPPort = 6666;
@@ -85,15 +82,15 @@ struct stats {
 };
 
 
-struct shaper_queue_index {
-  shaper_queue_index(uint64_t s_i, uint64_t q_i)
-      : shaper(s_i),
+struct fpolicer_queue_index {
+  fpolicer_queue_index(uint64_t s_i, uint64_t q_i)
+      : fpolicer(s_i),
         queue(q_i) {}
-  uint64_t shaper;
+  uint64_t fpolicer;
   uint64_t queue;
 };
 
-struct shaper_struct {
+struct fpolicer_struct {
   /**
    * @param rate rate in Mbps
    * @param burst rate in Mbps
@@ -103,7 +100,7 @@ struct shaper_struct {
    * @param qs Local IP address to be used by the applicaton in
    * `std::vector<juggler::dpdk::Packet *>` format.
    */
-  shaper_struct(float rate, uint64_t burst, uint16_t num_queues,
+  fpolicer_struct(float rate, uint64_t burst, uint16_t num_queues,
                 std::vector<uint64_t> q_sizes)
       : tokens(burst),
         rate(rate),
@@ -130,67 +127,43 @@ struct shaper_struct {
 };
 
 
-struct timerwheel_struct {
-  /**
-   * @param bkts queue size counters in bytes
-   * `std::vector<std::vector<shaper_struct *>>` format.
-   */
-  timerwheel_struct(std::vector<std::vector<shaper_struct *>> bkts, uint32_t n_bkts, uint64_t bkt_len)
-      : buckets(bkts),
-        num_buckets(n_bkts),
-        bucket_len(bkt_len),
-        last_dequeue_time(0),
-        current_slot(0) {}
-  std::vector<std::vector<shaper_struct *>> buckets;
-  uint32_t num_buckets;
-  uint64_t bucket_len;
-  uint64_t last_dequeue_time;
-  uint32_t current_slot;
-};
-
-
 /**
  * @brief This structure contains all the metadata required for all the routines
- * related to the shaper.
+ * related to the fpolicer.
  */
-struct shaper_context {
+struct fpolicer_context {
   /**
-   * @param rate Rate for each shaper in Mbps
+   * @param rate Rate for each fpolicer in Mbps
    * `float` format.
-   * @param qlen Size of each queue in shaper
+   * @param qlen Size of each queue in fpolicer
    * `uint_32t` format.
-   * @param burst Size of bucket in each shaper
+   * @param burst Size of bucket in each fpolicer
    * `uint_32t` format.
-   * @param num_shapers Number of shapers
+   * @param num_fpolicers Number of fpolicers
    * `uint_16t` format.
-   * @param num_queues Number of queues per shaper
+   * @param num_queues Number of queues per fpolicer
    * `uint_8t` format.
-   * @param shapers_list List of shapers
-   * `std::vector<shaper_struct*>` format.
-   * @param timer_wheel timer_wheel
-   * `timerwheel_struct*` format.
+   * @param fpolicers_list List of fpolicers
+   * `std::vector<fpolicer_struct*>` format.
    */
-  shaper_context(float rate,
+  fpolicer_context(float rate,
                uint32_t qlen,
                uint32_t burst,
-               uint16_t num_shapers,
+               uint16_t num_fpolicers,
                uint8_t num_queues,
-               std::vector<shaper_struct*> shapers_list,
-               timerwheel_struct* timer_wheel)
+               std::vector<fpolicer_struct*> fpolicers_list)
       : rate(rate),
         qlen(qlen),
         burst(burst),
-        num_shapers(num_shapers),
+        num_fpolicers(num_fpolicers),
         num_queues(num_queues),
-        shapers(shapers_list),
-        timerwheel(CHECK_NOTNULL(timer_wheel)){}
+        fpolicers(fpolicers_list){}
   float rate;
   uint32_t qlen;
   uint32_t burst;
-  uint16_t num_shapers;
+  uint16_t num_fpolicers;
   uint8_t num_queues;
-  std::vector<shaper_struct*> shapers;
-  timerwheel_struct* timerwheel;
+  std::vector<fpolicer_struct*> fpolicers;
 };
 
 /**
@@ -226,7 +199,7 @@ struct task_context {
                uint16_t packet_size, juggler::dpdk::RxRing *rxring,
                juggler::dpdk::TxRing *txring,
                std::vector<std::vector<uint8_t>> payloads,
-               shaper_context* shaper_ctx)
+               fpolicer_context* fpolicer_ctx)
       : local_mac_addr(local_mac),
         local_ipv4_addr(local_ip),
         remote_mac_addr(remote_mac1),
@@ -237,7 +210,7 @@ struct task_context {
         rx_ring(CHECK_NOTNULL(rxring)),
         tx_ring(CHECK_NOTNULL(txring)),
         packet_payloads(payloads),
-        shaper_ctx(shaper_ctx),
+        fpolicer_ctx(fpolicer_ctx),
         arp_handler(local_mac, {local_ip}),
         statistics(),
         rtt_log() {}
@@ -254,7 +227,7 @@ struct task_context {
   juggler::dpdk::TxRing *tx_ring;
 
   std::vector<std::vector<uint8_t>> packet_payloads;
-  shaper_context* shaper_ctx;
+  fpolicer_context* fpolicer_ctx;
   juggler::ArpHandler arp_handler;
 
   stats statistics;
@@ -431,64 +404,64 @@ void report_final_stats(void *context) {
 }
 
 
-shaper_queue_index* classify(juggler::net::Ipv4 * ipv4h, task_context* ctx){
-    uint64_t shaper = 0;
+fpolicer_queue_index* classify(juggler::net::Ipv4 * ipv4h, task_context* ctx){
+    uint64_t fpolicer = 0;
     uint64_t queue = 0;
     auto *udph = reinterpret_cast<juggler::net::Udp *>(ipv4h + 1);
     uint16_t dst_port =  uint16_t(udph->src_port.port.value());
 
     if (ipv4h->dst_addr.address == juggler::be32_t(ctx->remote_ipv4_addr.value().address)){
-      shaper += 1;
-      shaper += (dst_port / 64);
+      fpolicer += 1;
+      fpolicer += (dst_port / 64);
       queue += (dst_port % 64);
     } else if (ipv4h->dst_addr.address == juggler::be32_t(ctx->remote_ipv4_addr2.value().address)){
-      shaper += 1025;
-      shaper += (dst_port / 64);
+      fpolicer += 1025;
+      fpolicer += (dst_port / 64);
       queue += (dst_port % 64);
     }
 
-    if (shaper){
-      shaper_queue_index* sqi = new shaper_queue_index(shaper, queue);
+    if (fpolicer){
+      fpolicer_queue_index* sqi = new fpolicer_queue_index(fpolicer, queue);
       return sqi;
     }
     return NULL;
 }
 
-void phantom_dequeue(uint64_t now, shaper_struct* shaper){
-  if (!shaper->qsize){
+void phantom_dequeue(uint64_t now, fpolicer_struct* fpolicer){
+  if (!fpolicer->qsize){
     return;
   }
-  uint64_t time_elapsed = now - shaper->last_dequeue_time;
+  uint64_t time_elapsed = now - fpolicer->last_dequeue_time;
   float time_elapsed_ms = juggler::time::cycles_to_ms(time_elapsed);
-  shaper->tokens += shaper->bytes_per_ms * time_elapsed_ms;
-  shaper->tokens = std::min(shaper->tokens, shaper->burst);
-  // std::cout<<"ph-dequeue "<< time_elapsed_ms <<" "<<shaper->tokens << std::endl;
-  if (!shaper->tokens){
+  fpolicer->tokens += fpolicer->bytes_per_ms * time_elapsed_ms;
+  fpolicer->tokens = std::min(fpolicer->tokens, fpolicer->burst);
+  // std::cout<<"ph-dequeue "<< time_elapsed_ms <<" "<<fpolicer->tokens << std::endl;
+  if (!fpolicer->tokens){
     return;
   }
-  shaper->last_dequeue_time = now;
-  uint16_t active_queues = shaper->active_queues.size();
-  uint16_t sum_qi = std::reduce(shaper->active_queues.begin(), shaper->active_queues.end());;
-  while (shaper->tokens / sum_qi && shaper->qsize){
-  // while (shaper->tokens / active_queues && shaper->qsize){
-    uint64_t per_queue_tokens = shaper->tokens / sum_qi;
-    // uint64_t per_queue_tokens = shaper->tokens / active_queues;
+  fpolicer->last_dequeue_time = now;
+  uint16_t active_queues = fpolicer->active_queues.size();
+  uint16_t sum_qi = std::reduce(fpolicer->active_queues.begin(), fpolicer->active_queues.end());;
+  while (fpolicer->tokens / sum_qi && fpolicer->qsize){
+  // while (fpolicer->tokens / active_queues && fpolicer->qsize){
+    uint64_t per_queue_tokens = fpolicer->tokens / sum_qi;
+    // uint64_t per_queue_tokens = fpolicer->tokens / active_queues;
     for (uint16_t i=0; i<active_queues; i++){
-      uint64_t q_i_share = per_queue_tokens * shaper->active_queues[i];
-      if (shaper->queue_sizes[shaper->active_queues[i]] > q_i_share){
-        shaper->queue_sizes[shaper->active_queues[i]] -= q_i_share;
-        shaper->tokens -= q_i_share;
-        shaper->qsize -= q_i_share;
+      uint64_t q_i_share = per_queue_tokens * fpolicer->active_queues[i];
+      if (fpolicer->queue_sizes[fpolicer->active_queues[i]] > q_i_share){
+        fpolicer->queue_sizes[fpolicer->active_queues[i]] -= q_i_share;
+        fpolicer->tokens -= q_i_share;
+        fpolicer->qsize -= q_i_share;
       } else {
-        shaper->tokens -= shaper->queue_sizes[shaper->active_queues[i]];
-        shaper->qsize -= shaper->queue_sizes[shaper->active_queues[i]];
-        shaper->queue_sizes[shaper->active_queues[i]] = 0;
-        uint64_t q_i = shaper->active_queues[i];
-        shaper->active_queues.erase(std::remove(shaper->active_queues.begin(), shaper->active_queues.end(), q_i), shaper->active_queues.end());
+        fpolicer->tokens -= fpolicer->queue_sizes[fpolicer->active_queues[i]];
+        fpolicer->qsize -= fpolicer->queue_sizes[fpolicer->active_queues[i]];
+        fpolicer->queue_sizes[fpolicer->active_queues[i]] = 0;
+        uint64_t q_i = fpolicer->active_queues[i];
+        fpolicer->active_queues.erase(std::remove(fpolicer->active_queues.begin(), fpolicer->active_queues.end(), q_i), fpolicer->active_queues.end());
       }
     }
-    active_queues = shaper->active_queues.size();
-    sum_qi = std::reduce(shaper->active_queues.begin(), shaper->active_queues.end());;
+    active_queues = fpolicer->active_queues.size();
+    sum_qi = std::reduce(fpolicer->active_queues.begin(), fpolicer->active_queues.end());;
   }
 }
 
@@ -498,7 +471,7 @@ void phantom_dequeue(uint64_t now, shaper_struct* shaper){
 // This routine receives packets, and bounces them back to the remote host.
 void enqueue(uint64_t now, void *context) {
   auto ctx = static_cast<task_context *>(context);
-  auto shp_ctx = ctx->shaper_ctx;
+  auto fp_ctx = ctx->fpolicer_ctx;
   auto rx = ctx->rx_ring;
   auto tx = ctx->tx_ring;
   auto *st = &ctx->statistics;
@@ -532,7 +505,7 @@ void enqueue(uint64_t now, void *context) {
 
     auto *ipv4h = packet->head_data<juggler::net::Ipv4 *>(sizeof(*eh));
     // configure headers to relay traffic, we have a proxy like architecture, where sender attempts to send data
-    // to a receiver but iptables on sender (and receiver) reroute packets to the shaper proxy. So we need to replace
+    // to a receiver but iptables on sender (and receiver) reroute packets to the fpolicer proxy. So we need to replace
     // mac and ip headers here.
     if (ipv4h->src_addr.address == juggler::be32_t(ctx->remote_ipv4_addr.value().address)){
       
@@ -571,21 +544,21 @@ void enqueue(uint64_t now, void *context) {
 
     }
 
-    // classify packet into a shaper id and queue id
-    auto shaper_queue_id = classify(ipv4h, ctx);
+    // classify packet into a fpolicer id and queue id
+    auto fpolicer_queue_id = classify(ipv4h, ctx);
     uint64_t cycles = _rdtsc();
-    if (shaper_queue_id){
+    if (fpolicer_queue_id){
 
-      auto shaper_id = shaper_queue_id->shaper;
-      auto queue_id = shaper_queue_id->queue;
-      phantom_dequeue(now, shp_ctx->shapers[shaper_id]);
-      uint64_t threshold = shp_ctx->qlen - shp_ctx->shapers[shaper_id]->qsize;
-      if(shp_ctx->shapers[shaper_id]->queue_sizes[queue_id] + packet->length() <= threshold){
-        if (!shp_ctx->shapers[shaper_id]->queue_sizes[queue_id]){
-          shp_ctx->shapers[shaper_id]->active_queues.push_back(queue_id);
+      auto fpolicer_id = fpolicer_queue_id->fpolicer;
+      auto queue_id = fpolicer_queue_id->queue;
+      phantom_dequeue(now, fp_ctx->fpolicers[fpolicer_id]);
+      uint64_t threshold = fp_ctx->qlen - fp_ctx->fpolicers[fpolicer_id]->qsize;
+      if(fp_ctx->fpolicers[fpolicer_id]->queue_sizes[queue_id] + packet->length() <= threshold){
+        if (!fp_ctx->fpolicers[fpolicer_id]->queue_sizes[queue_id]){
+          fp_ctx->fpolicers[fpolicer_id]->active_queues.push_back(queue_id);
         }
-        shp_ctx->shapers[shaper_id]->queue_sizes[queue_id] += packet->length();
-        shp_ctx->shapers[shaper_id]->qsize += packet->length();
+        fp_ctx->fpolicers[fpolicer_id]->queue_sizes[queue_id] += packet->length();
+        fp_ctx->fpolicers[fpolicer_id]->qsize += packet->length();
         tx_batch.Append(packet);
 
         const auto tx_bytes_index = tx_batch.GetSize() - 1;
@@ -624,7 +597,7 @@ void enqueue(uint64_t now, void *context) {
 int main(int argc, char *argv[]) {
   ::google::InitGoogleLogging(argv[0]);
   gflags::ParseCommandLineFlags(&argc, &argv, true);
-  gflags::SetUsageMessage("Simple packet shaper.");
+  gflags::SetUsageMessage("Simple packet fpolicer.");
 
   signal(SIGINT, int_handler);
 
@@ -632,11 +605,11 @@ int main(int argc, char *argv[]) {
   std::optional<juggler::net::Ipv4::Address> remote_ip1;
   std::optional<juggler::net::Ipv4::Address> remote_ip2;
   if (FLAGS_remote_ip1.empty()) {
-    LOG(ERROR) << "Remote IP address is required in shaper mode.";
+    LOG(ERROR) << "Remote IP address is required in fpolicer mode.";
     exit(1);
   }
   if (FLAGS_remote_ip2.empty()) {
-    LOG(ERROR) << "Remote IP address is required in shaper mode.";
+    LOG(ERROR) << "Remote IP address is required in fpolicer mode.";
     exit(1);
   }
   remote_ip1 = juggler::net::Ipv4::Address::MakeAddress(FLAGS_remote_ip1);
@@ -716,36 +689,29 @@ int main(int argc, char *argv[]) {
   // auto tx_packet_pool = std::make_unique<juggler::dpdk::PacketPool>(4096);
   // We share the packet pool attached to the RX ring. Since we plan to handle a
   // queue pair from a single core this is safe.
-  std::vector<shaper_struct*> shapers_list;
+  std::vector<fpolicer_struct*> fpolicers_list;
   float rate = float(static_cast<uint64_t>(FLAGS_rate)) / 1000.0;
-  for (uint16_t i=0; i<FLAGS_num_shapers; i++){
+  for (uint16_t i=0; i<FLAGS_num_aggregates; i++){
     std::vector<uint64_t> q_sizes;
     for (uint8_t j=0; j<FLAGS_num_queues; j++){
       q_sizes.push_back(0);
     }
-    shaper_struct* shp = new shaper_struct(rate, FLAGS_qlen, static_cast<uint16_t>(FLAGS_num_queues), q_sizes);
-    shapers_list.push_back(shp);
+    fpolicer_struct* fp = new fpolicer_struct(rate, FLAGS_qlen, static_cast<uint16_t>(FLAGS_num_queues), q_sizes);
+    fpolicers_list.push_back(fp);
   }
 
-  std::vector<std::vector<shaper_struct *>> bkts;
-  for (uint16_t i=0; i<FLAGS_num_buckets; i++){
-    std::vector<shaper_struct *> bkt_i;
-    bkts.push_back(bkt_i);
-  }
-  timerwheel_struct* timer_wheel = new timerwheel_struct(bkts, FLAGS_num_buckets, FLAGS_bucket_size);
-
-  shaper_context* shp_ctx = new shaper_context(rate, FLAGS_qlen, FLAGS_burst, FLAGS_num_shapers, FLAGS_num_queues, shapers_list, timer_wheel);
+  fpolicer_context* fp_ctx = new fpolicer_context(rate, FLAGS_qlen, FLAGS_burst, FLAGS_num_aggregates, FLAGS_num_queues, fpolicers_list);
   task_context task_ctx(interface.l2_addr(), interface.ip_addr(),
                         remote_l2_addr1, remote_ip1, remote_l2_addr2, remote_ip2, packet_len, rxring, txring,
-                        packet_payloads, shp_ctx);
+                        packet_payloads, fp_ctx);
 
-  auto packet_shaper = [](uint64_t now, void *context) {
+  auto packet_fpolicer = [](uint64_t now, void *context) {
     enqueue(now, context);
     report_stats(now, context);
   };
 
   auto routine =
-      packet_shaper;
+      packet_fpolicer;
   // Create a task object to pass to worker thread.
   auto task =
       std::make_shared<juggler::Task>(routine, static_cast<void *>(&task_ctx));

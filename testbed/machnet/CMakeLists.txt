@@ -11,6 +11,7 @@ set(BUILD_TESTING OFF) # Disable testing for third-party modules
 
 # Glog doesn't correctly define its include directories, so we need to specify
 # manually
+add_compile_definitions(GLOG_USE_GLOG_EXPORT)
 add_subdirectory(third_party/glog)
 include_directories(SYSTEM third_party/glog/src)
 include_directories(SYSTEM ${CMAKE_BINARY_DIR}/third_party/glog)

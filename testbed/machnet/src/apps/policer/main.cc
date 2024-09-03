@@ -48,8 +48,10 @@ DEFINE_bool(zerocopy, true, "Use memcpy to fill packet payload.");
 DEFINE_string(rtt_log, "", "Log file for RTT measurements.");
 
 DEFINE_uint64(rate, 1500, "Rate in Kbit/s.");
-DEFINE_uint64(qlen, 32000, "Token bucket size in bytes.");
-DEFINE_uint64(num_policers, 2050, "Number of policer instantiations.");
+DEFINE_uint64(burst, 30000, "Bucket size in bytes.");
+DEFINE_uint64(qlen, 32000, "Queue length in bytes.");
+DEFINE_uint64(num_aggregates, 2050, "Number of policer instantiations.");
+DEFINE_uint64(num_queues, 64, "Number of queues per policer instantiations.");
 
 
 // This is the source/destination UDP port used by the application.
@@ -92,11 +94,20 @@ struct policer_queue_index {
 struct policer_struct {
   /**
    * @param rate rate in Mbps
+   * @param burst rate in Mbps
+   * @param num_queues rate in Mbps
+   * @param q_sizes queue size counters in bytes
+   * `std::vector<uint64_t>` format.
+   * @param qs Local IP address to be used by the applicaton in
+   * `std::vector<juggler::dpdk::Packet *>` format.
    */
-  policer_struct(float rate)
-      : tokens(30000),
+  policer_struct(float rate, uint64_t burst, uint16_t num_queues,
+                std::vector<uint64_t> q_sizes)
+      : tokens(burst),
         rate(rate),
         bytes_per_ms(rate*1024.0*1024.0/8000.0),
+        burst(burst),
+        num_queues(num_queues),
         i(0),    
         scheduled(0),
         qsize(0),
@@ -105,6 +116,8 @@ struct policer_struct {
   uint64_t tokens;
   float rate;
   float bytes_per_ms;
+  uint64_t burst;
+  uint16_t num_queues;
   uint16_t i;
   bool scheduled;
   uint64_t qsize;
@@ -123,22 +136,32 @@ struct policer_context {
    * `float` format.
    * @param qlen Size of each queue in policer
    * `uint_32t` format.
+   * @param burst Size of bucket in each policer
+   * `uint_32t` format.
    * @param num_policers Number of policers
    * `uint_16t` format.
+   * @param num_queues Number of queues per policer
+   * `uint_8t` format.
    * @param policers_list List of policers
    * `std::vector<policer_struct*>` format.
    */
   policer_context(float rate,
                uint32_t qlen,
+               uint32_t burst,
                uint16_t num_policers,
+               uint8_t num_queues,
                std::vector<policer_struct*> policers_list)
       : rate(rate),
         qlen(qlen),
+        burst(burst),
         num_policers(num_policers),
+        num_queues(num_queues),
         policers(policers_list){}
   float rate;
   uint32_t qlen;
+  uint32_t burst;
   uint16_t num_policers;
+  uint8_t num_queues;
   std::vector<policer_struct*> policers;
 };
 
@@ -420,14 +443,19 @@ void phantom_dequeue(uint64_t now, policer_struct* policer){
 
 
 
-// Main enqueue routine.
-// This routine receives packets, polices, drops and transmits packets.
+// Main network bounce routine.
+// This routine receives packets, and bounces them back to the remote host.
 void enqueue(uint64_t now, void *context) {
   auto ctx = static_cast<task_context *>(context);
-  auto policer_ctx = ctx->policer_ctx;
+  auto pol_ctx = ctx->policer_ctx;
   auto rx = ctx->rx_ring;
   auto tx = ctx->tx_ring;
   auto *st = &ctx->statistics;
+
+  // NOTE: In bouncing mode we use only one packet pool for both RX and TX. In
+  // particular, we use the pool that is associated with the RX ring. We only
+  // need to touch the ethernet and IP headers. Since we don't use packets from
+  // both pools this approach is also safe with `FAST_FREE' enabled.
 
   juggler::dpdk::PacketBatch rx_batch;
   auto packets_received = rx->RecvPackets(&rx_batch);
@@ -492,17 +520,17 @@ void enqueue(uint64_t now, void *context) {
 
     }
 
-    // classify packet into a policer id
+    // classify packet into a policer id and queue id
     auto policer_queue_id = classify(ipv4h, ctx);
     uint64_t cycles = _rdtsc();
     if (policer_queue_id){
 
       auto policer_id = policer_queue_id->policer;
-      if(policer_ctx->policers[policer_id]->qsize + packet->length() > policer_ctx->qlen){
-        phantom_dequeue(now, policer_ctx->policers[policer_id]);
+      if(pol_ctx->policers[policer_id]->qsize + packet->length() > pol_ctx->qlen){
+        phantom_dequeue(now, pol_ctx->policers[policer_id]);
       }
-      if(policer_ctx->policers[policer_id]->qsize + packet->length() <= policer_ctx->qlen){
-        policer_ctx->policers[policer_id]->qsize += packet->length();
+      if(pol_ctx->policers[policer_id]->qsize + packet->length() <= pol_ctx->qlen){
+        pol_ctx->policers[policer_id]->qsize += packet->length();
         tx_batch.Append(packet);
 
         const auto tx_bytes_index = tx_batch.GetSize() - 1;
@@ -635,15 +663,19 @@ int main(int argc, char *argv[]) {
   // queue pair from a single core this is safe.
   std::vector<policer_struct*> policers_list;
   float rate = float(static_cast<uint64_t>(FLAGS_rate)) / 1000.0;
-  for (uint16_t i=0; i<FLAGS_num_policers; i++){
-    policer_struct* policer = new policer_struct(rate);
-    policers_list.push_back(policer);
+  for (uint16_t i=0; i<FLAGS_num_aggregates; i++){
+    std::vector<uint64_t> q_sizes;
+    for (uint8_t j=0; j<FLAGS_num_queues; j++){
+      q_sizes.push_back(0);
+    }
+    policer_struct* pol = new policer_struct(rate, FLAGS_burst, static_cast<uint16_t>(FLAGS_num_queues), q_sizes);
+    policers_list.push_back(pol);
   }
 
-  policer_context* policer_ctx = new policer_context(rate, FLAGS_qlen, FLAGS_num_policers, policers_list);
+  policer_context* pol_ctx = new policer_context(rate, FLAGS_qlen, FLAGS_burst, FLAGS_num_aggregates, FLAGS_num_queues, policers_list);
   task_context task_ctx(interface.l2_addr(), interface.ip_addr(),
                         remote_l2_addr1, remote_ip1, remote_l2_addr2, remote_ip2, packet_len, rxring, txring,
-                        packet_payloads, policer_ctx);
+                        packet_payloads, pol_ctx);
 
   auto packet_policer = [](uint64_t now, void *context) {
     enqueue(now, context);
@@ -656,7 +688,7 @@ int main(int argc, char *argv[]) {
   auto task =
       std::make_shared<juggler::Task>(routine, static_cast<void *>(&task_ctx));
 
-  std::cout << "Starting policer." << std::endl;
+  std::cout << "Starting in phantom mode." << std::endl;
 
   juggler::WorkerPool<juggler::Task> WPool({task}, {interface.cpu_mask()});
   WPool.Init();
