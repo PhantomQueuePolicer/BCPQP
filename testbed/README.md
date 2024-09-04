@@ -61,7 +61,7 @@ Compile machnet:
 ```
 cd machnet
 git submodule update --init --recursive
-ldconfig
+sudo ldconfig
 mkdir release_build
 cd release_build
 cmake -DCMAKE_BUILD_TYPE=Release -GNinja ../
@@ -163,4 +163,26 @@ And run following at the sender:
 python3 run.py
 ```
 
-This generates a file containing summary of per-flow throughput in `logs` directory at the receiver. Additionally, information about CPU cycles per packet is printed on middlebox VM's shell, copy this into a log as well.
+This generates a file containing summary of per-flow throughput measured over 250 ms windows in `logs` directory at the receiver. 
+
+Additionally, information about CPU cycles per packet is printed on middlebox VM's shell like this:
+
+```
+main.cc:352 [TX PPS: 1792.999784 (0.012731 Gbps), RX PPS: 2836.999659 (0.012731 Gbps), TX_DROP PPS: 1043.999874, Cycles(Enq: 90.513218, Deq:0.000000)]
+```
+
+# Generate Plots
+
+To generate plots, you will need to label files in `logs` appropriately i.e. sort files into directories based on enforced rate [1.5, 7.5, 25, ...] with 1 file for each baseline. Then you can add file paths in the `scripts/plot_all.py` file and run:
+
+```
+python3 scripts/plot_all.py
+```
+
+This generates plots for average enforced rate, tail throughput and fairness index. 
+
+Save the machnet logs and label them at the top of the file, and then run the following to get CPU cycles per packet and Drop rate:
+
+```
+python3 scripts/process_machnet_logs.py
+```
