@@ -10,6 +10,8 @@ While we evaluated BC-PQP for our paper with F8sv2 VMs running Ubuntu 22.04, you
 
 ## Building Machnet
 
+Do the following at the middlebox VMs (one with two interfaces):
+
 Update and install dependencies:
 
 ```
@@ -143,15 +145,16 @@ Correct performance of different baseline is senstive to parameters like queue s
 python3 scripts/parameters.py --rate 1500 -maxrtt 100 --nq 64 --ns 2050 --sender 192.168.0.1 --receiver 192.168.1.1
 ```
 
-This generate commands with correct parameters for all baselines.
+This generate commands with correct parameters for all baselines. You can now run the given commands from the middlebox VM from the `BCPQP/testbed/machnet/src/`.
 
-Visit the `config.py` file to configure workload setup. We emulate different RTTs per-flow using netem, run the following to set the appropriate `tc` rules:
+
+At the sender, visit the `scripts/config.py` file to configure workload setup. We emulate different RTTs per-flow using netem, run the following to set the appropriate `tc` rules:
 
 ```
 sudo python3 scripts/rtt-qdisc.py
 ```
 
-Finally run the command for required baseline at the middlebox, then run following at the receiver:
+Finally run the command for required baseline (generated above) at the middlebox, then run following at the receiver:
 
 ```
 python3 traffic_server.py
