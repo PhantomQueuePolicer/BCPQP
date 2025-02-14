@@ -2,6 +2,7 @@ import os
 import time
 import configs
 import sys
+import json 
 from traffic_generator import *
 
 cc_exps = configs.cc_flows
@@ -12,17 +13,39 @@ start_times = configs.start_times
 periods = configs.periods
 repeats = configs.repeats
 burst_sizes = [5, 3]
+config_rate = configs.rate
+config_queuetype = configs.queue_types
+config_rtt = configs.RTT_ms
+config_queuesize = configs.queue_sizes
+config_burtsize = configs.burst
 
 queue_exps = [sys.argv[1]] # bytes
 results_dir = sys.argv[1]
 
 os.makedirs(results_dir, exist_ok=True)
 
+def log_configs(file_name):
+    configs = {
+        "cc_flows": cc_exps, 
+        "data_to_send": data_to_send, 
+        "repeats": repeats, 
+        "periods": periods, 
+        "rate": config_rate, 
+        "queue_type": config_queuetype, 
+        "rtt": config_rtt,
+        "queue_size": config_queuesize, 
+        "burst/bucket": config_burtsize,
+    }
+    with open(file_name, "w") as file:
+        json.dump(configs, file, indent=4)
+        
+
 base_ports = {"cubic":16000, "bbr": 20000, "abc": 24000, "reno": 26000, "vegas": 30000}
 pt = 0
 for cc in cc_exps:
     for q in queue_exps:
         exp_name = cc.replace(" ","_").replace(",","_").replace("-","").replace(":","_")
+        config_filename = f"{results_dir}/{exp_name}/configs.json"
         if not os.path.exists("%s/%s" %(results_dir, exp_name)):
             os.mkdir("%s/%s" %(results_dir, exp_name))
         cc_types = cc.split(", ")
@@ -49,7 +72,7 @@ for cc in cc_exps:
             cfg = Config(congestions, ports, schedule, bursts=[1,1])
         if "abc" in cc:
             os.system("sudo sysctl -w net.ipv4.tcp_ecn=1")
-        tg = TrafficGenerator(cfg, tcpdump_fname="%s/%s/capture.pcap" %(results_dir, exp_name), tcpdump=True)
+        tg = TrafficGenerator(cfg, tcpdump_fname="%s/%s/reciever_capture.pcap" %(results_dir, exp_name), tcpdump_client_fname="%s/%s/sender_capture.pcap" %(results_dir, exp_name), tcpdump=True)
         tg.run()
         os.system("cp mm.log %s/%s/mm.log" %(results_dir, exp_name))
         os.system("cp phantom_log.log %s/%s/phantom.log" %(results_dir, exp_name))
@@ -57,5 +80,6 @@ for cc in cc_exps:
         tg.report_metrics("%s/%s/server.log" %(results_dir, exp_name))
         tg.close()
         os.system("cat /dev/null > mm.log")
+        log_configs(config_filename)        
 
 print("done")
