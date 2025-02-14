@@ -6,8 +6,8 @@ import configs
 exp_dir = configs.exp_dir
 # topology
 # server --> traffic shapper: 
-mm_before_shaper_string = "mm-delay 10 mm-link ../mahimahi/traces/1.up ../mahimahi/traces/1.up --uplink-log=mm.log --uplink-queue="
-mm_after_shaper_string = "mm-delay 45"
+rtt = 25
+mm_before_shaper_string = "mm-delay %d mm-link ../mahimahi/traces/1.up ../mahimahi/traces/1.up --uplink-log=mm.log --uplink-queue=" %(rtt)
 mm_loss = ""
 exp_string = "python3 exp.py"
 
@@ -34,7 +34,7 @@ for queue in queue_types:
         vs = vqueue_sizes[i]
         exp_name = exp_dir+"/%s_%d%d" %(queue, vs, rate)
         while True:
-            mm_string = "%s%s --uplink-queue-args=\"bytes=%d,burst=%d,limit=%d,rate=%d,pacing=%d,queue=%d,flows=%d,quantum=1504,eeta=100,lowerlimit=%d,upperlimit=%d,resetlimit=%d\" %s %s %s %s" %(mm_before_shaper_string, queue_, s, burst, vs, rate, pacing_rate, internal_queue, num_flows, lqueue_sizes[i], vqueue_sizes[i], limit_refresh, mm_after_shaper_string, mm_loss, exp_string, exp_name)
+            mm_string = "%s%s --uplink-queue-args=\"bytes=%d,burst=%d,limit=%d,rate=%d,pacing=%d,queue=%d,flows=%d,quantum=1504,eeta=100,lowerlimit=%d,upperlimit=%d,resetlimit=%d\" %s %s %s" %(mm_before_shaper_string, queue_, s, burst, vs, rate, pacing_rate, internal_queue, num_flows, lqueue_sizes[i], vqueue_sizes[i], limit_refresh, mm_loss, exp_string, exp_name)
             proc = subprocess.Popen(mm_string, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
 
             (out, err) = proc.communicate()

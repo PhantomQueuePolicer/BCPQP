@@ -2,6 +2,8 @@ import socket
 import threading
 import time
 import configs
+import subprocess
+import os
 
 class Config():
     def __init__(self, congestion_protocols, ports, schedule, bursts=[]):
@@ -30,15 +32,17 @@ class Config():
         return l_schedule
 
 class TrafficGenerator():
-    def __init__(self, config, tcpdump_fname= "", tcpdump=False):
+    def __init__(self, config, tcpdump_fname= "", tcpdump_client_fname = "", tcpdump=False):
         self.config = config
         self.time_now = 0
         self.tcpdump = tcpdump
+        self.tcpdump_process = None
         if self.tcpdump:
             self.control_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.control_conn.connect((configs.local_ip, 8081))
             msg = "tcpdump:%s" %(tcpdump_fname)
             self.control_conn.send(msg.encode('utf-8'))
+            self.run_tcpdump(tcpdump_client_fname)
         #sort by times
         self.conns = [self.client_socket(config.ports[i], config.congestion_protocols[i], config.schedule[i]) for i in range(config.number_connections)]
 
@@ -57,7 +61,20 @@ class TrafficGenerator():
             threads.append(t)
         for t in threads:
             t.join()
-    
+
+        if self.tcpdump:
+            self.kill_tcpdump()
+   
+    def run_tcpdump(self, directory):
+        self.tcpdump_process = subprocess.Popen(["tcpdump", "-i", "any", "-w", directory, "net", "100.64.0.0/24"], shell=False, stdout=subprocess.DEVNULL, preexec_fn=os.setsid)
+        print("STARTED TCP DUMP\n")
+        
+    def kill_tcpdump(self):
+        if self.tcpdump_process:
+            os.killpg(os.getpgid(self.tcpdump_process.pid), 9)
+            self.tcpdump_process = None
+            print("TCP DUMP KILLED\n")
+
     def client_socket(self, port, congestion_algo, schedule):
         clientsocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         clientsocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
